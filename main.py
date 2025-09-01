@@ -16,7 +16,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create tables
 Base.metadata.create_all(bind=engine)
 
 # Include routes

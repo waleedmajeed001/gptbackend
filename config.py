@@ -5,7 +5,7 @@ load_dotenv()
 
 class Settings:
     PROJECT_NAME: str = "TechTicks Chatbot"
-    DATABASE_URL: str = os.getenv("DATABASE_URL")  # NeonDB
+    DATABASE_URL: str = os.getenv("DATABASE_URL")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY")
 
 settings = Settings()
