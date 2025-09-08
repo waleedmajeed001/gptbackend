@@ -14,12 +14,22 @@ router = APIRouter()
 class ClientCreate(BaseModel):
     name: str
     logo_url: str
+    industry: str = ""
+    website: str = ""
+    testimonial: str = ""
+    testimonial_author: str = ""
+    testimonial_position: str = ""
 
 
 class ClientOut(BaseModel):
     id: int
     name: str
     logo_url: str
+    industry: str
+    website: str
+    testimonial: str
+    testimonial_author: str
+    testimonial_position: str
 
     class Config:
         from_attributes = True
@@ -46,7 +56,15 @@ def list_clients(db: Session = Depends(get_db)):
 
 @router.post("/", response_model=ClientOut)
 def create_client(data: ClientCreate, db: Session = Depends(get_db)):
-    client = Client(name=data.name, logo_url=data.logo_url)
+    client = Client(
+        name=data.name,
+        logo_url=data.logo_url,
+        industry=data.industry,
+        website=data.website,
+        testimonial=data.testimonial,
+        testimonial_author=data.testimonial_author,
+        testimonial_position=data.testimonial_position
+    )
     db.add(client)
     db.commit()
     db.refresh(client)
