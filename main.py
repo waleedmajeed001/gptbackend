@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import chat, faqs, projects, clients
+from routes import chat, faqs, projects, clients, auth
 
 app = FastAPI(title="TechTicks Chatbot")
 
@@ -16,6 +16,7 @@ app.add_middleware(
 )
 
 # Include routes
+app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(chat.router, prefix="/api", tags=["Chat"])
 app.include_router(faqs.router, prefix="/api/faqs", tags=["FAQs"])
 app.include_router(projects.router, prefix="/api/projects", tags=["Projects"])

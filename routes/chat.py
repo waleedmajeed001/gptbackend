@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
 from pydantic import BaseModel
 from typing import List, Optional
 import sys
@@ -10,11 +12,15 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from simple_faqs import search_faqs, get_suggested_questions
 from services.llm import ask_gemini
 from ready_made_questions import get_questions_by_category, get_all_categories, get_featured_questions, get_questions_for_category
+from database import get_db
+from models import ChatSession, ChatMessage, User
+from routes.auth import get_current_user
 
 router = APIRouter()
 
 class ChatRequest(BaseModel):
     message: str
+    session_id: Optional[int] = None
     conversation_history: Optional[List[dict]] = []
 
 class ChatResponse(BaseModel):
@@ -114,16 +120,22 @@ def generate_ai_response(message: str, related_faqs: List[dict]) -> str:
     {faq_context}
 
     INSTRUCTIONS:
-    - Provide accurate, helpful information about TechTicks
-    - Include specific details, metrics, and examples when relevant
-    - Be conversational and professional
-    - If asked about services, mention specific case studies and technologies
-    - If asked about pricing, mention competitive rates and contact for quotes
-    - If asked about contact, provide all contact information
-    - Keep responses concise but informative
-    - Always maintain a positive, professional tone representing TechTicks
+    - Provide accurate, helpful information about TechTicks.
+    - Include specific details, metrics, and examples when relevant.
+    - Be conversational and professional.
+    - If asked about services, mention specific case studies and technologies.
+    - If asked about pricing, mention competitive rates and contact for quotes.
+    - If asked about contact, provide all contact information.
+    - Keep responses concise but informative.
+    - Always maintain a positive, professional tone representing TechTicks.
+    - IMPORTANT: Format the entire answer in clean Markdown with:
+      - A short bolded summary line at the top
+      - Bullet points for lists and key facts
+      - Subheadings (###) for sections when useful
+      - Inline links where appropriate
+      - No surrounding backticks unless showing code
 
-    RESPONSE:
+    RESPONSE (Markdown only):
     """
     
     try:
@@ -135,7 +147,37 @@ def generate_ai_response(message: str, related_faqs: List[dict]) -> str:
         return f"Thank you for your question about '{message}'. TechTicks is a premier software development firm specializing in AI development, web and mobile apps, DevOps, and more. We've completed 200+ projects for 500+ clients across 50+ countries. For specific information, please contact us at info@techticks.io or visit https://techticks.io/"
 
 @router.post("/chat")
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Get or create chat session
+    if req.session_id:
+        session = db.query(ChatSession).filter(
+            ChatSession.id == req.session_id,
+            ChatSession.user_id == current_user.id
+        ).first()
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+    else:
+        # Create new session if none provided
+        session = ChatSession(
+            user_id=current_user.id,
+            session_name="New Chat",
+            is_guest_session=current_user.is_guest
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+    
+    # Store user message
+    user_message = ChatMessage(
+        session_id=session.id,
+        role="user",
+        content=req.message
+    )
+    db.add(user_message)
+    
     # Search for relevant FAQs
     search_query = req.message.lower()
     relevant_faqs = search_faqs(search_query)
@@ -157,6 +199,22 @@ async def chat(req: ChatRequest):
     
     # Calculate confidence score based on FAQ relevance
     confidence_score = min(0.9, 0.3 + (len(relevant_faqs) * 0.2))
+    
+    # Store assistant message
+    assistant_message = ChatMessage(
+        session_id=session.id,
+        role="assistant",
+        content=ai_response,
+        related_faqs=json.dumps(relevant_faqs) if relevant_faqs else None,
+        suggested_questions=json.dumps(suggested_questions) if suggested_questions else None,
+        confidence_score=str(confidence_score)
+    )
+    db.add(assistant_message)
+    
+    # Update session timestamp
+    session.updated_at = func.now()
+    
+    db.commit()
     
     return ChatResponse(
         response=ai_response,
@@ -211,5 +269,62 @@ async def get_question_categories():
         "categories": get_all_categories(),
         "featured_questions": get_featured_questions()
     }
+
+@router.get("/chat/sessions/{session_id}/messages")
+async def get_session_messages(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get messages for a specific chat session"""
+    session = db.query(ChatSession).filter(
+        ChatSession.id == session_id,
+        ChatSession.user_id == current_user.id
+    ).first()
+    
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+    
+    messages = db.query(ChatMessage).filter(
+        ChatMessage.session_id == session_id
+    ).order_by(ChatMessage.created_at).all()
+    
+    return [
+        {
+            "id": msg.id,
+            "role": msg.role,
+            "content": msg.content,
+            "related_faqs": json.loads(msg.related_faqs) if msg.related_faqs else None,
+            "suggested_questions": json.loads(msg.suggested_questions) if msg.suggested_questions else None,
+            "confidence_score": float(msg.confidence_score) if msg.confidence_score else None,
+            "created_at": msg.created_at
+        }
+        for msg in messages
+    ]
+
+@router.get("/chat/sessions")
+async def get_user_sessions(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all chat sessions for the current user"""
+    sessions = db.query(ChatSession).filter(
+        ChatSession.user_id == current_user.id
+    ).order_by(ChatSession.updated_at.desc()).all()
+    
+    return [
+        {
+            "id": session.id,
+            "session_name": session.session_name,
+            "is_guest_session": session.is_guest_session,
+            "created_at": session.created_at,
+            "updated_at": session.updated_at,
+            "message_count": len(session.messages)
+        }
+        for session in sessions
+    ]
 
 

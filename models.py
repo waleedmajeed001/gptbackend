@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from database import Base
 
 class FAQ(Base):
@@ -55,3 +56,44 @@ class CompanyInfo(Base):
     total_clients = Column(Integer, default=500)
     total_countries = Column(Integer, default=50)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=True)  # Nullable for guest users
+    username = Column(String, unique=True, index=True, nullable=True)  # Nullable for guest users
+    hashed_password = Column(String, nullable=True)  # Nullable for guest users
+    is_guest = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_login = Column(DateTime(timezone=True), nullable=True)
+    
+    # Relationship to chat sessions
+    chat_sessions = relationship("ChatSession", back_populates="user")
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Nullable for guest sessions
+    session_name = Column(String, default="New Chat")
+    is_guest_session = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    user = relationship("User", back_populates="chat_sessions")
+    messages = relationship("ChatMessage", back_populates="session")
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"))
+    role = Column(String)  # 'user' or 'assistant'
+    content = Column(Text)
+    related_faqs = Column(Text, nullable=True)  # JSON string for related FAQs
+    suggested_questions = Column(Text, nullable=True)  # JSON string for suggested questions
+    confidence_score = Column(String, nullable=True)  # Store as string to avoid precision issues
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationship
+    session = relationship("ChatSession", back_populates="messages")

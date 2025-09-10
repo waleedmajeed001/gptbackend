@@ -54,7 +54,7 @@ python seed_techticks_data.py
 
 ## 7) Run the API server
 ```bash
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn main:app --reload
 ```
 
 API will be available at:
